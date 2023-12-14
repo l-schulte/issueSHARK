@@ -99,7 +99,7 @@ class LaunchpadBackend(BaseBackend):
             + '?ws.op=searchTasks'
             + (f'&modified_since={start_date.isoformat()}' if start_date else '')
             + '&order_by=date_last_updated'
-            + f'{[f"&status={status}" for status in STATUS_VALUES]}'
+            + ''.join([f"&status={status}" for status in STATUS_VALUES])
         }
 
         while 'next_collection_link' in response:
