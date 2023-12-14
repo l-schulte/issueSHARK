@@ -68,9 +68,12 @@ class LaunchpadBackend(BaseBackend):
 
         # Get all issues
         issues_generator = self.get_issues(starting_date)
-
+        counter = 0
         for base, issue in issues_generator:
             self.store_issue(base, issue)
+            counter += 1
+
+        logger.info("Collected %s issues." % counter)
 
     def get_issues(self, start_date: datetime.datetime = None) -> typing.Generator:
         """
