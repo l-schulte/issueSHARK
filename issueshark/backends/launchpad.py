@@ -90,12 +90,16 @@ class LaunchpadBackend(BaseBackend):
         # BASE_URL = f'https://api.launchpad.net/{API_VERSION}/{PROJECT}'
 
         BASE_URL = self.config.tracking_url
+        STATUS_VALUES = ["New", "Incomplete", "Opinion", "Invalid", "Won't Fix", "Expired", "Confirmed",
+                         "Triaged", "In Progress", "Fix Committed", "Fix Released", "Does Not Exist",
+                         "Incomplete (with response)", "Incomplete (without response)"]
 
         response = {
             'next_collection_link': BASE_URL
             + '?ws.op=searchTasks'
             + (f'&modified_since={start_date.isoformat()}' if start_date else '')
             + '&order_by=date_last_updated'
+            + f'{[f"&status={status}" for status in STATUS_VALUES]}'
         }
 
         while 'next_collection_link' in response:
