@@ -69,7 +69,8 @@ class GithubBackend(BaseBackend):
         logger.info("Starting the collection process...")
 
         # Get last modification date (since then, we will collect bugs)
-        last_issue = Issue.objects(issue_system_id=self.issue_system_id).order_by('-updated_at').only('updated_at').first()
+        last_issue = Issue.objects(issue_system_id=self.issue_system_id).order_by(
+            '-updated_at').only('updated_at').first()
         starting_date = None
         if last_issue is not None:
             starting_date = last_issue.updated_at
@@ -169,7 +170,7 @@ class GithubBackend(BaseBackend):
                                       VCSSystem.objects(project_id=self.project_id).only('id').all()]
 
                     event.commit_id = Commit.objects(vcs_system_id__in=vcs_system_ids,
-                                                 revision_hash=raw_event['commit_id']).only('id').get().id
+                                                     revision_hash=raw_event['commit_id']).only('id').get().id
                 except DoesNotExist:
                     pass
 
@@ -197,15 +198,14 @@ class GithubBackend(BaseBackend):
             if 'assignee' in raw_event and raw_event['assignee'] is not None:
                 event.new_value = self._get_people(raw_event['assignee']['url'])
 
-
-            #if 'assigner' in raw_event and raw_event['assigner'] is not None:
+            # if 'assigner' in raw_event and raw_event['assigner'] is not None:
             #    event.assigner_id = self._get_people(raw_event['assigner']['url'])
 
         if raw_event['event'] == 'unassigned':
             if 'assignee' in raw_event and raw_event['assignee'] is not None:
                 event.old_value = self._get_people(raw_event['assignee']['url'])
 
-            #if 'assigner' in raw_event and raw_event['assigner'] is not None:
+            # if 'assigner' in raw_event and raw_event['assigner'] is not None:
             #    event.assigner_id = self._get_people(raw_event['assigner']['url'])
 
         if raw_event['event'] == 'labeled' and 'label' in raw_event:
@@ -224,7 +224,7 @@ class GithubBackend(BaseBackend):
             event.old_value = raw_event['rename']['from']
             event.new_value = raw_event['rename']['to']
 
-            mongo_issue.title = raw_event['rename']['from']
+            # mongo_issue.title = raw_event['rename']['from']
 
     def _process_comments(self, system_id, mongo_issue):
         """
@@ -350,4 +350,3 @@ class GithubBackend(BaseBackend):
                 return resp.json()
 
         raise RequestException("Problem with getting data via url %s." % url)
-
