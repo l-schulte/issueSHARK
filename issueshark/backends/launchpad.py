@@ -190,12 +190,6 @@ class LaunchpadBackend(BaseBackend):
                               old_value=raw_event['oldvalue'],
                               author_id=self._get_people(raw_event['person_link']))
 
-            # If the event affects the issue data, we need to set back the issue to its original state
-            if event.status == 'summary':
-                mongo_issue.title = event.old_value
-            if event.status == 'description':
-                mongo_issue.desc = event.old_value
-
             mongo_issue.save()
 
             events_to_store.append(event)
