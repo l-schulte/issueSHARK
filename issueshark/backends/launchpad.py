@@ -148,7 +148,7 @@ class LaunchpadBackend(BaseBackend):
         issue.desc = raw_issue['description']
         issue.updated_at = updated_at
         issue.created_at = created_at
-        issue.status = elvis(raw_issue, 'status')
+        issue.status = raw_base_issue['status']
         issue.labels = raw_issue['tags']
 
         mongo_issue = issue.save()
