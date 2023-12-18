@@ -245,7 +245,7 @@ class LaunchpadBackend(BaseBackend):
             return None
 
         people_id = People.objects(
-            name=raw_person['display_name']
+            username=raw_person['name']
         ).upsert_one(name=raw_person['display_name'], username=raw_person['name']).id
         self.people[url] = people_id
 
