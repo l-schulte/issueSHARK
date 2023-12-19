@@ -69,31 +69,23 @@ class LaunchpadBackend(BaseBackend):
 
         logger.info("Starting the collection process...")
 
-        # Get last modification date (since then, we will collect bugs)
-        last_issue = Issue.objects(issue_system_id=self.issue_system_id)\
-            .order_by('-updated_at').only('updated_at').first()
-
-        starting_date = None
-        if last_issue is not None:
-            starting_date = last_issue.updated_at
-
         counter = 0
 
         # Get all specs
-        specs_generator = self.get_specs(starting_date)
+        specs_generator = self.get_specs()
         for spec in specs_generator:
             self.store_issue(spec)
             counter += 1
 
         # Get all bugs
-        bugs_generator = self.get_bugs(starting_date)
+        bugs_generator = self.get_bugs()
         for bug in bugs_generator:
             self.store_issue(bug)
             counter += 1
 
         logger.info("Collected %s issues." % counter)
 
-    def get_specs(self, start_date: datetime.datetime = None) -> typing.Generator:
+    def get_specs(self) -> typing.Generator:
         """
         Creates a generator that yields specs parsed into the issue format collected from launchpad.
 
@@ -117,11 +109,11 @@ class LaunchpadBackend(BaseBackend):
 
             for raw_spec in response['entries']:
                 bugs = self._send_request(raw_spec['bugs_collection_link'])
-                bug_ids = [str(bug['id']) for bug in bugs['entries']]
+                bug_ids = [{'id': str(bug['id'])} for bug in bugs['entries']]
 
                 owner = self._get_people(raw_spec['owner_link'])
                 drafter = self._get_people(raw_spec['drafter_link'])
-                approver = self._get_people(raw_spec['approver_link'])
+                # approver = self._get_people(raw_spec['approver_link'])
                 assignee = self._get_people(raw_spec['assignee_link'])
 
                 fallback_date = '01-01-1900T12:00:00.0+00:00'
@@ -131,15 +123,17 @@ class LaunchpadBackend(BaseBackend):
                     dateutil.parser.parse(elvis(raw_spec, 'date_completed', fallback_date))
                 )
 
+                description = raw_spec['summary']
+                if elvis(raw_spec, 'whiteboard'):
+                    description += "\n\n--- whiteboard: ---\n\n" + raw_spec['whiteboard']
+
                 spec = {
                     'external_id': raw_spec['name'],
                     'reporter_id': owner,
                     'creator_id': drafter,
                     'assignee_id': assignee,
-                    'approver_id': approver,
                     'title': raw_spec['title'],
-                    'desc': raw_spec['summary'],
-                    'whiteboard': raw_spec['whiteboard'],
+                    'desc': description,
                     'updated_at': updated_at,
                     'created_at': dateutil.parser.parse(raw_spec['date_created']),
                     'status': raw_spec['lifecycle_status'],
@@ -238,9 +232,9 @@ class LaunchpadBackend(BaseBackend):
         issue.status = raw_issue['status']
         issue.labels = raw_issue['labels']
         # spec specific
-        issue.approver_id = raw_issue['approver_id']
-        issue.whiteboard = raw_issue['whiteboard']
-        issue.bug_ids = raw_issue['bug_ids']
+        # issue.approver_id = elvis(raw_issue, 'approver_id')
+        # issue.whiteboard = elvis(raw_issue, 'whiteboard')
+        issue.issue_links = elvis(raw_issue, 'bug_ids')
 
         mongo_issue = issue.save()
 
