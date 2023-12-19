@@ -8,8 +8,10 @@ import dateutil
 import requests
 import time
 import datetime
+import os
 
 from mongoengine import DoesNotExist
+import uuid
 
 logger = logging.getLogger('backend')
 
@@ -21,13 +23,17 @@ def elvis(dict, key, fallback_value=None):
     :param key:
     :param fallback_value:
     """
-    return dict[key] if (dict is not None and key in dict) else fallback_value
+    return dict[key] if (dict is not None and key in dict and dict[key] is not None) else fallback_value
 
 
 class LaunchpadBackend(BaseBackend):
     """
     Backend that collects issues from Launchpad.
     """
+
+    oauth_consumer_key = 'issueSHARK'
+    oauth_token = None
+    oauth_signature = None
 
     @property
     def identifier(self):
@@ -54,6 +60,11 @@ class LaunchpadBackend(BaseBackend):
         logger.setLevel(self.debug_level)
         self.people = {}
 
+        # From https://help.launchpad.net/API/SigningRequests
+        credentials = self._get_credentials()
+        self.oauth_token = credentials[0]
+        self.oauth_signature = credentials[1]
+
     def process(self):
 
         logger.info("Starting the collection process...")
@@ -66,22 +77,85 @@ class LaunchpadBackend(BaseBackend):
         if last_issue is not None:
             starting_date = last_issue.updated_at
 
-        # Get all issues
-        issues_generator = self.get_issues(starting_date)
         counter = 0
-        for base, issue in issues_generator:
-            self.store_issue(base, issue)
+
+        # Get all specs
+        specs_generator = self.get_specs(starting_date)
+        for spec in specs_generator:
+            self.store_issue(spec)
+            counter += 1
+
+        # Get all bugs
+        bugs_generator = self.get_bugs(starting_date)
+        for bug in bugs_generator:
+            self.store_issue(bug)
             counter += 1
 
         logger.info("Collected %s issues." % counter)
 
-    def get_issues(self, start_date: datetime.datetime = None) -> typing.Generator:
+    def get_specs(self, start_date: datetime.datetime = None) -> typing.Generator:
         """
-        Creates a generator that yields the raw issues collected from the launchpad API.
+        Creates a generator that yields specs parsed into the issue format collected from launchpad.
+
+        :return: generator that yields the raw issues.
+            :class:`generator`
+        """
+
+        # PROJECT = 'nova'
+        # API_VERSION = 'devel'  # 1.0; beta;
+        # BASE_URL = f'https://api.launchpad.net/{API_VERSION}/{PROJECT}/all_specifications'
+
+        BASE_URL = self.config.tracking_url + '/all_specifications'
+
+        response = {
+            'next_collection_link': BASE_URL
+        }
+
+        while 'next_collection_link' in response:
+            print(response['next_collection_link'])
+            response = self._send_request(response['next_collection_link'])
+
+            for raw_spec in response['entries']:
+                bugs = self._send_request(raw_spec['bugs_collection_link'])
+                bug_ids = [str(bug['id']) for bug in bugs['entries']]
+
+                owner = self._get_people(raw_spec['owner_link'])
+                drafter = self._get_people(raw_spec['drafter_link'])
+                approver = self._get_people(raw_spec['approver_link'])
+                assignee = self._get_people(raw_spec['assignee_link'])
+
+                fallback_date = '01-01-1900T12:00:00.0+00:00'
+                updated_at = max(
+                    dateutil.parser.parse(elvis(raw_spec, 'date_created', fallback_date)),
+                    dateutil.parser.parse(elvis(raw_spec, 'date_started', fallback_date)),
+                    dateutil.parser.parse(elvis(raw_spec, 'date_completed', fallback_date))
+                )
+
+                spec = {
+                    'external_id': raw_spec['name'],
+                    'reporter_id': owner,
+                    'creator_id': drafter,
+                    'assignee_id': assignee,
+                    'approver_id': approver,
+                    'title': raw_spec['title'],
+                    'desc': raw_spec['summary'],
+                    'whiteboard': raw_spec['whiteboard'],
+                    'updated_at': updated_at,
+                    'created_at': dateutil.parser.parse(raw_spec['date_created']),
+                    'status': raw_spec['lifecycle_status'],
+                    'labels': [],
+                    'bug_ids': bug_ids
+                }
+
+                yield spec
+
+    def get_bugs(self, start_date: datetime.datetime = None) -> typing.Generator:
+        """
+        Creates a generator that yields bugs parsed into the issue format collected from launchpad.
 
         :param start_date: date from which the issues should be collected.
             :class:`datetime.datetime`
-        :return: generator that yields the raw issues.
+        :return: generator that yields the issues.
             :class:`generator`
         """
 
@@ -97,7 +171,7 @@ class LaunchpadBackend(BaseBackend):
         response = {
             'next_collection_link': BASE_URL
             + '?ws.op=searchTasks'
-            + (f'&modified_since={start_date.isoformat()}' if start_date else '')
+            + (f'&modified_since={(start_date + datetime.timedelta(0,1)).isoformat()}' if start_date else '')
             + '&order_by=date_last_updated'
             + ''.join([f"&status={status}" for status in STATUS_VALUES])
         }
@@ -105,10 +179,31 @@ class LaunchpadBackend(BaseBackend):
         while 'next_collection_link' in response:
             response = self._send_request(response['next_collection_link'])
 
-            for entry in response['entries']:
-                yield entry, self._send_request(entry['bug_link'])
+            for raw_base_bug in response['entries']:
+                raw_bug = self._send_request(raw_base_bug['bug_link'])
 
-    def store_issue(self, raw_base_issue, raw_issue):
+                owner = self._get_people(raw_bug['owner_link'])
+                assignee = self._get_people(raw_base_bug['assignee_link'])
+
+                bug = {
+                    'external_id': str(raw_bug['id']),
+                    'reporter_id': owner,
+                    'creator_id': owner,
+                    'assignee_id': assignee,
+                    'title': raw_bug['title'],
+                    'desc': raw_bug['description'],
+                    'updated_at': dateutil.parser.parse(raw_bug['date_last_updated']),
+                    'created_at': dateutil.parser.parse(raw_bug['date_created']),
+                    'status': raw_base_bug['status'],
+                    'labels': raw_bug['tags'],
+
+                    'messages_collection_link': raw_bug['messages_collection_link'],
+                    'activity_collection_link': raw_bug['activity_collection_link'],
+                }
+
+                yield bug
+
+    def store_issue(self, raw_issue):
         """
         Transforms the issue from a launchpad issue to our issue model
 
@@ -126,35 +221,33 @@ class LaunchpadBackend(BaseBackend):
 
         logger.debug('Processing issue %s' % raw_issue)
 
-        external_id = str(raw_issue['id'])
-
-        created_at = dateutil.parser.parse(raw_issue['date_created'])
-        updated_at = dateutil.parser.parse(raw_issue['date_last_updated'])
+        external_id = raw_issue['external_id']
 
         try:
-            # We can not return here, as the issue might be updated. This means, that the title could be updated
-            # as well as comments and new events
             issue = Issue.objects(issue_system_id=self.issue_system_id, external_id=external_id).get()
         except DoesNotExist:
             issue = Issue(issue_system_id=self.issue_system_id, external_id=external_id)
 
-        owner = self._get_people(raw_issue['owner_link'])
-        assignee = self._get_people(raw_base_issue['assignee_link'])
-
-        issue.reporter_id = owner
-        issue.creator_id = owner
-        issue.assignee_id = assignee
+        issue.reporter_id = raw_issue['reporter_id']
+        issue.creator_id = raw_issue['creator_id']
+        issue.assignee_id = raw_issue['assignee_id']
         issue.title = raw_issue['title']
-        issue.desc = raw_issue['description']
-        issue.updated_at = updated_at
-        issue.created_at = created_at
-        issue.status = raw_base_issue['status']
-        issue.labels = raw_issue['tags']
+        issue.desc = raw_issue['desc']
+        issue.updated_at = raw_issue['updated_at']
+        issue.created_at = raw_issue['created_at']
+        issue.status = raw_issue['status']
+        issue.labels = raw_issue['labels']
+        # spec specific
+        issue.approver_id = raw_issue['approver_id']
+        issue.whiteboard = raw_issue['whiteboard']
+        issue.bug_ids = raw_issue['bug_ids']
 
         mongo_issue = issue.save()
 
-        self._process_comments(str(issue['id']), raw_issue['messages_collection_link'], mongo_issue)
-        self._process_events(str(issue['id']), raw_issue['activity_collection_link'], mongo_issue)
+        if 'messages_collection_link' in raw_issue:
+            self._process_comments(str(issue['id']), raw_issue['messages_collection_link'], mongo_issue)
+        if 'activity_collection_link' in raw_issue:
+            self._process_events(str(issue['id']), raw_issue['activity_collection_link'], mongo_issue)
 
         return mongo_issue
 
@@ -233,50 +326,154 @@ class LaunchpadBackend(BaseBackend):
             IssueComment.objects.insert(comments_to_insert, load_bulk=False)
 
     def _get_people(self, url):
+        """
+        Gets the people id from the launchpad url
+
+        :param url: url to the launchpad person
+        :return: id of the person
+        """
         if url is None:
             return None
 
         if url in self.people:
             return self.people[url]
 
-        raw_person = self._send_request(url)
+        raw_person = self._send_request(url, use_credentials=True)
 
         if raw_person is None:
             return None
 
+        fallback_email = f"nobody_{raw_person['name']}@nobody.com"
+        email = elvis(
+            raw_person,
+            'preferred_email_address_link',
+            fallback_email
+        ).split('/')[-1]
+
+        if email == 'tag:launchpad.net:2008:redacted':
+            email = fallback_email
+
         people_id = People.objects(
-            username=raw_person['name']
-        ).upsert_one(name=raw_person['display_name'], username=raw_person['name']).id
+            username=raw_person['name'],
+            email=email
+        ).upsert_one(
+            username=raw_person['name'],
+            email=email,
+            name=raw_person['display_name']
+        ).id
+
         self.people[url] = people_id
 
         return people_id
 
-    def _send_request(self, url):
+    def _send_request(self, url, use_credentials=False):
         """
-        Sends arequest using the requests library to the url specified
+        Sends a request using the requests library to the url specified.
+        If the request fails, it is repeated 2 more times.
 
         :param url: url to which the request should be sent
         """
-        auth = None
+
         headers = None
 
         # Make the request
         tries = 1
         while tries <= 3:
+            params = {
+                'oauth_consumer_key': self.oauth_consumer_key,
+                'oauth_consumer_secret': ' ',
+                'oauth_nonce': str(uuid.uuid4()),
+                'oauth_signature': f'&{self.oauth_signature}',
+                'oauth_signature_method': 'PLAINTEXT',
+                'oauth_timestamp': str(int(time.time())),
+                'oauth_token': self.oauth_token,
+                'oauth_version': '1.0',
+            } if use_credentials else None
+
             logger.debug("Sending request to url: %s (Try: %s)" % (url, tries))
-            resp = requests.get(url, headers=headers, proxies=self.config.get_proxy_dictionary(), auth=auth)
+            resp = requests.get(url, params=params, headers=headers,
+                                proxies=self.config.get_proxy_dictionary())
 
             if resp.status_code == 410:
                 logger.error("The url %s is no longer available." % url)
                 return None
 
             if resp.status_code != 200:
-                logger.error("Problem with getting data via url %s. Error: %s" % (url, resp.text))
+                logger.error("Problem with getting data via url %s. Error: %s - %s" %
+                             (url, resp.status_code, resp.text))
                 tries += 1
-                time.sleep(2)
+                time.sleep((tries + 1) ** 2)
             else:
                 logger.debug('Got response: %s' % resp.json())
 
                 return resp.json()
 
         raise requests.RequestException("Problem with getting data via url %s." % url)
+
+    def _get_credentials(self) -> tuple[str, str]:
+        """
+        Gets the credentials for the launchpad backend.
+
+        The credentials are stored in the config file.
+
+        :return: tuple of the credentials
+        """
+        # Check if 'launchpad.conf' exists in file system
+        if os.path.isfile('launchpad.conf'):
+            conf = open('launchpad.conf', 'r')
+            content = conf.read().split(', ')
+            conf.close()
+            return content[0], content[1]
+
+        LAUNCHPAD_REQUESTTOKEN_URL = "https://launchpad.net/+request-token"
+
+        resp = requests.post(
+            LAUNCHPAD_REQUESTTOKEN_URL,
+            data={
+                'Content-type': 'application/x-www-form-urlencoded',
+                'oauth_consumer_key': self.oauth_consumer_key,
+                'oauth_signature_method': 'PLAINTEXT',
+                'oauth_signature': '&'
+            }
+        )
+        content = resp.text.split('&')
+        oauth_request_token = content[0].split('=')[1]
+        oauth_request_token_secret = content[1].split('=')[1]
+
+        message = f"""
+        ###########################################################################
+        #                                                                         #
+        #     Launchpad requires you to log-in and authorize the access token     #
+        #                                                                         #
+        #             The required level of access is "Read Anything"             #
+        #                                                                         #
+        # https://launchpad.net/+authorize-token?oauth_token={oauth_request_token} #
+        #                                                                         #
+        ###########################################################################
+        """
+
+        print(message)
+        input("Press Enter once the authorization is complete...")
+
+        LAUNCHPAD_ACCESSTOKEN_URL = "https://launchpad.net/+access-token"
+
+        resp = requests.post(
+            LAUNCHPAD_ACCESSTOKEN_URL,
+            data={
+                'Content-type': 'application/x-www-form-urlencoded',
+                'oauth_token': oauth_request_token,
+                'oauth_consumer_key': self.oauth_consumer_key,
+                'oauth_signature_method': 'PLAINTEXT',
+                'oauth_signature': f'&{oauth_request_token_secret}'
+            }
+        )
+
+        content = resp.text.split('&')
+        oauth_token = content[0].split('=')[1]
+        oauth_token_secret = content[1].split('=')[1]
+
+        conf = open('launchpad.conf', 'w')
+        conf.write(oauth_token + ', ' + oauth_token_secret)
+        conf.close()
+
+        return oauth_token, oauth_token_secret
