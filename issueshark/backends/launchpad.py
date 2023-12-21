@@ -387,8 +387,8 @@ class LaunchpadBackend(BaseBackend):
         except DoesNotExist:
             people = People(username=raw_person["name"], email=email)
 
-        people.name = raw_person["display_name"]
-        people.save()
+            people.name = raw_person["display_name"]
+            people = people.save()
 
         self.people[url] = people.id
 
