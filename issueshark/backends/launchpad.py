@@ -384,9 +384,9 @@ class LaunchpadBackend(BaseBackend):
 
         try:
             # Try to identify the user by their email. If no email is given try the username.
-            if "email" in raw_person:
-                people = People.objects.get(email=raw_person["email"])
-            else:
+            try:
+                people = People.objects.get(email=email)
+            except DoesNotExist:
                 people = People.objects.get(username=raw_person["name"])
         except DoesNotExist:
             people = People(username=raw_person["name"], email=email)
