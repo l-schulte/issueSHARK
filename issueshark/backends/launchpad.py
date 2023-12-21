@@ -105,7 +105,6 @@ class LaunchpadBackend(BaseBackend):
         response = {"next_collection_link": BASE_URL}
 
         while "next_collection_link" in response:
-            print(response["next_collection_link"])
             response = self._send_request(response["next_collection_link"])
 
             for raw_spec in response["entries"]:
