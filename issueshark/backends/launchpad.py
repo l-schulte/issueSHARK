@@ -474,7 +474,14 @@ class LaunchpadBackend(BaseBackend):
         """
 
         print(message)
-        input("Press Enter once the authorization is complete...")
+
+        is_docker = os.environ.get("AM_I_IN_A_DOCKER_CONTAINER", False)
+
+        if is_docker:
+            print("Waiting for 60 seconds to give you time to log-in and authorize the access token...")
+            time.sleep(60)
+        else:
+            input("Press Enter once the authorization is complete...")
 
         LAUNCHPAD_ACCESSTOKEN_URL = "https://launchpad.net/+access-token"
 
