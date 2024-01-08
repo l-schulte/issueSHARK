@@ -199,7 +199,7 @@ class LaunchpadBackend(BaseBackend):
                     "updated_at": dateutil.parser.parse(raw_bug["date_last_updated"]),
                     "created_at": dateutil.parser.parse(raw_bug["date_created"]),
                     "status": raw_base_bug["status"],
-                    "priority": raw_bug["importance"],
+                    "priority": raw_base_bug["importance"],
                     "labels": raw_bug["tags"],
                     "messages_collection_link": raw_bug["messages_collection_link"],
                     "activity_collection_link": raw_bug["activity_collection_link"],
