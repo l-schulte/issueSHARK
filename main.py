@@ -12,8 +12,7 @@ from pycoshark.utils import get_base_argparser
 
 
 def setup_logging(
-    default_path=os.path.dirname(os.path.realpath(__file__))
-    + "/loggerConfiguration.json",
+    default_path=os.path.dirname(os.path.realpath(__file__)) + "/loggerConfiguration.json",
     default_level=logging.INFO,
 ):
     """
@@ -48,15 +47,9 @@ def start():
 
     logger.debug("Found the following backends: %s" % ", ".join(backend_choices))
 
-    parser = get_base_argparser(
-        "Collects information from different issue tracking systems.", "1.0.0"
-    )
-    parser.add_argument(
-        "-n", "--project-name", help="Name of the project to analyze.", required=True
-    )
-    parser.add_argument(
-        "-i", "--issueurl", help="URL to the bugtracking system.", required=True
-    )
+    parser = get_base_argparser("Collects information from different issue tracking systems.", "1.0.0")
+    parser.add_argument("-n", "--project-name", help="Name of the project to analyze.", required=True)
+    parser.add_argument("-i", "--issueurl", help="URL to the bugtracking system.", required=True)
     parser.add_argument(
         "-b",
         "--backend",
@@ -64,12 +57,8 @@ def start():
         default="github",
         choices=backend_choices,
     )
-    parser.add_argument(
-        "-PH", "--proxy-host", help="Proxy hostname or IP address.", default=None
-    )
-    parser.add_argument(
-        "-PP", "--proxy-port", help="Port of the proxy to use.", default=None
-    )
+    parser.add_argument("-PH", "--proxy-host", help="Proxy hostname or IP address.", default=None)
+    parser.add_argument("-PP", "--proxy-port", help="Port of the proxy to use.", default=None)
     parser.add_argument(
         "-Pp",
         "--proxy-password",
@@ -95,6 +84,7 @@ def start():
         default=None,
     )
     parser.add_argument(
+        "-ll",
         "--debug",
         help="Sets the debug level.",
         default="DEBUG",

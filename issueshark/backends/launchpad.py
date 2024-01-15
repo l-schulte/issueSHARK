@@ -23,11 +23,7 @@ def elvis(dict, key, fallback_value=None):
     :param key:
     :param fallback_value:
     """
-    return (
-        dict[key]
-        if (dict is not None and key in dict and dict[key] is not None)
-        else fallback_value
-    )
+    return dict[key] if (dict is not None and key in dict and dict[key] is not None) else fallback_value
 
 
 class LaunchpadBackend(BaseBackend):
@@ -118,22 +114,14 @@ class LaunchpadBackend(BaseBackend):
 
                 fallback_date = "01-01-1900T12:00:00.0+00:00"
                 updated_at = max(
-                    dateutil.parser.parse(
-                        elvis(raw_spec, "date_created", fallback_date)
-                    ),
-                    dateutil.parser.parse(
-                        elvis(raw_spec, "date_started", fallback_date)
-                    ),
-                    dateutil.parser.parse(
-                        elvis(raw_spec, "date_completed", fallback_date)
-                    ),
+                    dateutil.parser.parse(elvis(raw_spec, "date_created", fallback_date)),
+                    dateutil.parser.parse(elvis(raw_spec, "date_started", fallback_date)),
+                    dateutil.parser.parse(elvis(raw_spec, "date_completed", fallback_date)),
                 )
 
                 description = raw_spec["summary"]
                 if elvis(raw_spec, "whiteboard"):
-                    description += (
-                        "\n\n--- whiteboard: ---\n\n" + raw_spec["whiteboard"]
-                    )
+                    description += "\n\n--- whiteboard: ---\n\n" + raw_spec["whiteboard"]
 
                 spec = {
                     "external_id": raw_spec["name"],
@@ -145,6 +133,7 @@ class LaunchpadBackend(BaseBackend):
                     "updated_at": updated_at,
                     "created_at": dateutil.parser.parse(raw_spec["date_created"]),
                     "status": raw_spec["lifecycle_status"],
+                    "priority": raw_spec["priority"],
                     "labels": [],
                     "bug_ids": bug_ids,
                 }
@@ -186,11 +175,7 @@ class LaunchpadBackend(BaseBackend):
         response = {
             "next_collection_link": BASE_URL
             + "?ws.op=searchTasks"
-            + (
-                f"&modified_since={(start_date + datetime.timedelta(0,1)).isoformat()}"
-                if start_date
-                else ""
-            )
+            + (f"&modified_since={(start_date + datetime.timedelta(0,1)).isoformat()}" if start_date else "")
             + "&order_by=date_last_updated"
             + "".join([f"&status={status}" for status in STATUS_VALUES])
         }
@@ -214,6 +199,7 @@ class LaunchpadBackend(BaseBackend):
                     "updated_at": dateutil.parser.parse(raw_bug["date_last_updated"]),
                     "created_at": dateutil.parser.parse(raw_bug["date_created"]),
                     "status": raw_base_bug["status"],
+                    "priority": raw_base_bug["importance"],
                     "labels": raw_bug["tags"],
                     "messages_collection_link": raw_bug["messages_collection_link"],
                     "activity_collection_link": raw_bug["activity_collection_link"],
@@ -242,9 +228,7 @@ class LaunchpadBackend(BaseBackend):
         external_id = raw_issue["external_id"]
 
         try:
-            issue = Issue.objects(
-                issue_system_id=self.issue_system_id, external_id=external_id
-            ).get()
+            issue = Issue.objects(issue_system_id=self.issue_system_id, external_id=external_id).get()
         except DoesNotExist:
             issue = Issue(issue_system_id=self.issue_system_id, external_id=external_id)
 
@@ -256,6 +240,7 @@ class LaunchpadBackend(BaseBackend):
         issue.updated_at = raw_issue["updated_at"]
         issue.created_at = raw_issue["created_at"]
         issue.status = raw_issue["status"]
+        issue.priority = raw_issue["priority"]
         issue.labels = raw_issue["labels"]
         # spec specific
         # issue.approver_id = elvis(raw_issue, 'approver_id')
@@ -265,13 +250,9 @@ class LaunchpadBackend(BaseBackend):
         mongo_issue = issue.save()
 
         if "messages_collection_link" in raw_issue:
-            self._process_comments(
-                str(issue["id"]), raw_issue["messages_collection_link"], mongo_issue
-            )
+            self._process_comments(str(issue["id"]), raw_issue["messages_collection_link"], mongo_issue)
         if "activity_collection_link" in raw_issue:
-            self._process_events(
-                str(issue["id"]), raw_issue["activity_collection_link"], mongo_issue
-            )
+            self._process_events(str(issue["id"]), raw_issue["activity_collection_link"], mongo_issue)
 
         return mongo_issue
 
@@ -292,9 +273,7 @@ class LaunchpadBackend(BaseBackend):
         events_to_store = []
         for raw_event in events:
             created_at = dateutil.parser.parse(raw_event["datechanged"])
-            external_id = (
-                mongo_issue.external_id + "/activity/#" + raw_event["http_etag"]
-            )
+            external_id = mongo_issue.external_id + "/activity/#" + raw_event["http_etag"]
 
             # If the event is already saved, we can just continue, because nothing will change on the event
             try:
@@ -329,15 +308,19 @@ class LaunchpadBackend(BaseBackend):
         # Get all the comments for the corresponding issue
         comments = elvis(self._send_request(target_url), "entries", [])
 
+        if len(comments) == 0:
+            return
+
+        # Skip the first comment, since this is equal to the description of the issue
+        comments = comments[1:]
+
         # Go through all comments
         comments_to_insert = []
         for raw_comment in comments:
             created_at = dateutil.parser.parse(raw_comment["date_created"])
             external_id = "/".join(raw_comment["self_link"].split("/")[-3:])
             try:
-                IssueComment.objects(
-                    external_id=external_id, issue_id=mongo_issue.id
-                ).get()
+                IssueComment.objects(external_id=external_id, issue_id=mongo_issue.id).get()
                 continue
             except DoesNotExist:
                 owner = self._get_people(raw_comment["owner_link"])
@@ -374,9 +357,7 @@ class LaunchpadBackend(BaseBackend):
             return None
 
         fallback_email = f'{raw_person["name"]}@no_email.launchpad.issueSHARK'
-        email = elvis(raw_person, "preferred_email_address_link", fallback_email).split(
-            "/"
-        )[-1]
+        email = elvis(raw_person, "preferred_email_address_link", fallback_email).split("/")[-1]
 
         if email == "tag:launchpad.net:2008:redacted":
             email = fallback_email
@@ -384,13 +365,9 @@ class LaunchpadBackend(BaseBackend):
         try:
             # Try to identify the user by their email. If no email is given try the username.
             try:
-                people = People.objects.get(
-                    email=email, name=raw_person["display_name"]
-                )
+                people = People.objects.get(email=email, name=raw_person["display_name"])
             except DoesNotExist:
-                people = People.objects.get(
-                    username=raw_person["name"], name=raw_person["display_name"]
-                )
+                people = People.objects.get(username=raw_person["name"], name=raw_person["display_name"])
         except DoesNotExist:
             people = People(username=raw_person["name"], email=email)
 
@@ -443,8 +420,7 @@ class LaunchpadBackend(BaseBackend):
 
             if resp.status_code != 200:
                 logger.error(
-                    "Problem with getting data via url %s. Error: %s - %s"
-                    % (url, resp.status_code, resp.text)
+                    "Problem with getting data via url %s. Error: %s - %s" % (url, resp.status_code, resp.text)
                 )
                 tries += 1
                 time.sleep((tries + 1) ** 2)
@@ -498,7 +474,14 @@ class LaunchpadBackend(BaseBackend):
         """
 
         print(message)
-        input("Press Enter once the authorization is complete...")
+
+        is_docker = os.environ.get("AM_I_IN_A_DOCKER_CONTAINER", False)
+
+        if is_docker:
+            print("Waiting for 60 seconds to give you time to log-in and authorize the access token...")
+            time.sleep(60)
+        else:
+            input("Press Enter once the authorization is complete...")
 
         LAUNCHPAD_ACCESSTOKEN_URL = "https://launchpad.net/+access-token"
 
