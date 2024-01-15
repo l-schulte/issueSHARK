@@ -15,16 +15,17 @@ import dateutil.parser
 
 from pycoshark.mongomodels import *
 
-logger = logging.getLogger('backend')
-STATE_ALL = 'all'
-STATE_CLOSED = 'closed'
-STATE_OPEN = 'open'
+logger = logging.getLogger("backend")
+STATE_ALL = "all"
+STATE_CLOSED = "closed"
+STATE_OPEN = "open"
 
 
 class GitHubAPIError(Exception):
     """
     Exception that is thrown if an error with the github API occur.
     """
+
     pass
 
 
@@ -32,12 +33,13 @@ class GithubBackend(BaseBackend):
     """
     Backend that collects issue from github
     """
+
     @property
     def identifier(self):
         """
         Identifier of the backend (github)
         """
-        return 'github'
+        return "github"
 
     def __init__(self, cfg, issue_system_id, project_id):
         """
@@ -53,6 +55,7 @@ class GithubBackend(BaseBackend):
 
         logger.setLevel(self.debug_level)
         self.people = {}
+        self.current_token_index = 0
 
     def process(self):
         """
@@ -69,8 +72,12 @@ class GithubBackend(BaseBackend):
         logger.info("Starting the collection process...")
 
         # Get last modification date (since then, we will collect bugs)
-        last_issue = Issue.objects(issue_system_id=self.issue_system_id).order_by(
-            '-updated_at').only('updated_at').first()
+        last_issue = (
+            Issue.objects(issue_system_id=self.issue_system_id)
+            .order_by("-updated_at")
+            .only("updated_at")
+            .first()
+        )
         starting_date = None
         if last_issue is not None:
             starting_date = last_issue.updated_at
@@ -80,7 +87,7 @@ class GithubBackend(BaseBackend):
 
         # If no new bugs found, return
         if len(issues) == 0:
-            logger.info('No new issues found. Exiting...')
+            logger.info("No new issues found. Exiting...")
             sys.exit(0)
 
         # Otherwise, go through all issues (and all pages)
@@ -88,8 +95,8 @@ class GithubBackend(BaseBackend):
         while len(issues) > 0:
             for issue in issues:
                 mongo_issue = self.store_issue(issue)
-                self._process_comments(str(issue['number']), mongo_issue)
-                self._process_events(str(issue['number']), mongo_issue)
+                self._process_comments(str(issue["number"]), mongo_issue)
+                self._process_events(str(issue["number"]), mongo_issue)
             page_number += 1
             issues = self.get_issues(pagecount=page_number, start_date=starting_date)
 
@@ -106,32 +113,38 @@ class GithubBackend(BaseBackend):
 
         :param raw_issue: like we got it from github
         """
-        logger.debug('Processing issue %s' % raw_issue)
-        updated_at = dateutil.parser.parse(raw_issue['updated_at'])
-        created_at = dateutil.parser.parse(raw_issue['created_at'])
+        logger.debug("Processing issue %s" % raw_issue)
+        updated_at = dateutil.parser.parse(raw_issue["updated_at"])
+        created_at = dateutil.parser.parse(raw_issue["created_at"])
 
         try:
             # We can not return here, as the issue might be updated. This means, that the title could be updated
             # as well as comments and new events
-            issue = Issue.objects(issue_system_id=self.issue_system_id, external_id=str(raw_issue['number'])).get()
+            issue = Issue.objects(
+                issue_system_id=self.issue_system_id,
+                external_id=str(raw_issue["number"]),
+            ).get()
         except DoesNotExist:
-            issue = Issue(issue_system_id=self.issue_system_id, external_id=str(raw_issue['number']))
+            issue = Issue(
+                issue_system_id=self.issue_system_id,
+                external_id=str(raw_issue["number"]),
+            )
 
         labels = []
-        for label in raw_issue['labels']:
-            labels.append(label['name'])
+        for label in raw_issue["labels"]:
+            labels.append(label["name"])
 
-        issue.reporter_id = self._get_people(raw_issue['user']['url'])
+        issue.reporter_id = self._get_people(raw_issue["user"]["url"])
         issue.creator_id = issue.reporter_id
-        issue.title = raw_issue['title']
-        issue.desc = raw_issue['body']
+        issue.title = raw_issue["title"]
+        issue.desc = raw_issue["body"]
         issue.updated_at = updated_at
         issue.created_at = created_at
-        issue.status = raw_issue['state']
+        issue.status = raw_issue["state"]
         issue.labels = labels
 
-        if raw_issue['assignee'] is not None:
-            issue.assignee_id = self._get_people(raw_issue['assignee']['url'])
+        if raw_issue["assignee"] is not None:
+            issue.assignee_id = self._get_people(raw_issue["assignee"]["url"])
 
         return issue.save()
 
@@ -146,36 +159,53 @@ class GithubBackend(BaseBackend):
         :param mongo_issue: object of our issue model
         """
         # Get all events to the corresponding issue
-        target_url = '%s/%s/events' % (self.config.tracking_url, system_id)
+        target_url = "%s/%s/events" % (self.config.tracking_url, system_id)
         events = self._send_request(target_url)
 
         # Go through all events and create mongo objects from it
         events_to_store = []
         for raw_event in events:
-            created_at = dateutil.parser.parse(raw_event['created_at'])
+            created_at = dateutil.parser.parse(raw_event["created_at"])
 
             # If the event is already saved, we can just continue, because nothing will change on the event
             try:
-                Event.objects(external_id=raw_event['id'], issue_id=mongo_issue.id).get()
+                Event.objects(
+                    external_id=raw_event["id"], issue_id=mongo_issue.id
+                ).get()
                 continue
             except DoesNotExist:
-                event = Event(external_id=raw_event['id'],
-                              issue_id=mongo_issue.id, created_at=created_at, status=raw_event['event'])
+                event = Event(
+                    external_id=raw_event["id"],
+                    issue_id=mongo_issue.id,
+                    created_at=created_at,
+                    status=raw_event["event"],
+                )
 
-            if raw_event['commit_id'] is not None:
+            if raw_event["commit_id"] is not None:
                 # It can happen that a commit from another repository references this issue. Therefore, we can not
                 # find the commit, as it is not part of THIS repository
                 try:
-                    vcs_system_ids = [system.id for system in
-                                      VCSSystem.objects(project_id=self.project_id).only('id').all()]
+                    vcs_system_ids = [
+                        system.id
+                        for system in VCSSystem.objects(project_id=self.project_id)
+                        .only("id")
+                        .all()
+                    ]
 
-                    event.commit_id = Commit.objects(vcs_system_id__in=vcs_system_ids,
-                                                     revision_hash=raw_event['commit_id']).only('id').get().id
+                    event.commit_id = (
+                        Commit.objects(
+                            vcs_system_id__in=vcs_system_ids,
+                            revision_hash=raw_event["commit_id"],
+                        )
+                        .only("id")
+                        .get()
+                        .id
+                    )
                 except DoesNotExist:
                     pass
 
-            if 'actor' in raw_event and raw_event['actor'] is not None:
-                event.author_id = self._get_people(raw_event['actor']['url'])
+            if "actor" in raw_event and raw_event["actor"] is not None:
+                event.author_id = self._get_people(raw_event["actor"]["url"])
 
             self._set_old_and_new_value_for_event(event, raw_event, mongo_issue)
             mongo_issue.save()
@@ -194,35 +224,35 @@ class GithubBackend(BaseBackend):
         :param raw_event: raw event like it is acquired from the github api
         """
 
-        if raw_event['event'] == 'assigned':
-            if 'assignee' in raw_event and raw_event['assignee'] is not None:
-                event.new_value = self._get_people(raw_event['assignee']['url'])
+        if raw_event["event"] == "assigned":
+            if "assignee" in raw_event and raw_event["assignee"] is not None:
+                event.new_value = self._get_people(raw_event["assignee"]["url"])
 
             # if 'assigner' in raw_event and raw_event['assigner'] is not None:
             #    event.assigner_id = self._get_people(raw_event['assigner']['url'])
 
-        if raw_event['event'] == 'unassigned':
-            if 'assignee' in raw_event and raw_event['assignee'] is not None:
-                event.old_value = self._get_people(raw_event['assignee']['url'])
+        if raw_event["event"] == "unassigned":
+            if "assignee" in raw_event and raw_event["assignee"] is not None:
+                event.old_value = self._get_people(raw_event["assignee"]["url"])
 
             # if 'assigner' in raw_event and raw_event['assigner'] is not None:
             #    event.assigner_id = self._get_people(raw_event['assigner']['url'])
 
-        if raw_event['event'] == 'labeled' and 'label' in raw_event:
-            event.new_value = raw_event['label']['name']
+        if raw_event["event"] == "labeled" and "label" in raw_event:
+            event.new_value = raw_event["label"]["name"]
 
-        if raw_event['event'] == 'unlabeled' and 'label' in raw_event:
-            event.old_value = raw_event['label']['name']
+        if raw_event["event"] == "unlabeled" and "label" in raw_event:
+            event.old_value = raw_event["label"]["name"]
 
-        if raw_event['event'] == 'milestoned' and 'milestone' in raw_event:
-            event.new_value = raw_event['milestone']['title']
+        if raw_event["event"] == "milestoned" and "milestone" in raw_event:
+            event.new_value = raw_event["milestone"]["title"]
 
-        if raw_event['event'] == 'demilestoned' and 'milestone' in raw_event:
-            event.old_value = raw_event['milestone']['title']
+        if raw_event["event"] == "demilestoned" and "milestone" in raw_event:
+            event.old_value = raw_event["milestone"]["title"]
 
-        if raw_event['event'] == 'renamed' and 'rename' in raw_event:
-            event.old_value = raw_event['rename']['from']
-            event.new_value = raw_event['rename']['to']
+        if raw_event["event"] == "renamed" and "rename" in raw_event:
+            event.old_value = raw_event["rename"]["from"]
+            event.new_value = raw_event["rename"]["to"]
 
             # mongo_issue.title = raw_event['rename']['from']
 
@@ -234,23 +264,25 @@ class GithubBackend(BaseBackend):
         :param mongo_issue: object of our issue model
         """
         # Get all the comments for the corresponding issue
-        target_url = '%s/%s/comments' % (self.config.tracking_url, system_id)
+        target_url = "%s/%s/comments" % (self.config.tracking_url, system_id)
         comments = self._send_request(target_url)
 
         # Go through all comments
         comments_to_insert = []
         for raw_comment in comments:
-            created_at = dateutil.parser.parse(raw_comment['created_at'])
+            created_at = dateutil.parser.parse(raw_comment["created_at"])
             try:
-                IssueComment.objects(external_id=raw_comment['id'], issue_id=mongo_issue.id).get()
+                IssueComment.objects(
+                    external_id=raw_comment["id"], issue_id=mongo_issue.id
+                ).get()
                 continue
             except DoesNotExist:
                 comment = IssueComment(
-                    external_id=raw_comment['id'],
+                    external_id=raw_comment["id"],
                     issue_id=mongo_issue.id,
                     created_at=created_at,
-                    author_id=self._get_people(raw_comment['user']['url']),
-                    comment=raw_comment['body'],
+                    author_id=self._get_people(raw_comment["user"]["url"]),
+                    comment=raw_comment["body"],
                 )
                 comments_to_insert.append(comment)
 
@@ -258,7 +290,9 @@ class GithubBackend(BaseBackend):
         if comments_to_insert:
             IssueComment.objects.insert(comments_to_insert, load_bulk=False)
 
-    def get_issues(self, search_state='all', start_date=None, sorting='asc', pagecount=1):
+    def get_issues(
+        self, search_state="all", start_date=None, sorting="asc", pagecount=1
+    ):
         """
         Gets issues from the github API
 
@@ -268,8 +302,15 @@ class GithubBackend(BaseBackend):
         :param pagecount: page number
         """
         # Creates the target url for getting the issues
-        target_url = self.config.tracking_url + "?state=" + search_state + "&page=" + str(pagecount) \
-            + "&per_page=100&sort=updated&direction=" + sorting
+        target_url = (
+            self.config.tracking_url
+            + "?state="
+            + search_state
+            + "&page="
+            + str(pagecount)
+            + "&per_page=100&sort=updated&direction="
+            + sorting
+        )
 
         if start_date:
             target_url = target_url + "&since=" + str(start_date)
@@ -288,19 +329,20 @@ class GithubBackend(BaseBackend):
             return self.people[user_url]
 
         raw_user = self._send_request(user_url)
-        name = raw_user['name']
+        name = raw_user["name"]
 
         if name is None:
-            name = raw_user['login']
+            name = raw_user["login"]
 
-        email = raw_user['email']
+        email = raw_user["email"]
         if email is None:
-            email = 'null'
+            email = "null"
 
-        people_id = People.objects(
-            name=name,
-            email=email
-        ).upsert_one(name=name, email=email, username=raw_user['login']).id
+        people_id = (
+            People.objects(name=name, email=email)
+            .upsert_one(name=name, email=email, username=raw_user["login"])
+            .id
+        )
         self.people[user_url] = people_id
         return people_id
 
@@ -315,37 +357,67 @@ class GithubBackend(BaseBackend):
 
         # If tokens are used, set the header, if not use basic authentication
         if self.config.use_token():
-            headers = {'Authorization': 'token %s' % self.config.token}
+            headers = {
+                "Authorization": "token %s"
+                % self.config.token[self.current_token_index]
+            }
         else:
             auth = HTTPBasicAuth(self.config.issue_user, self.config.issue_password)
 
         # Make the request
         tries = 1
-        while tries <= 3:
+        max_tries = len(self.config.token) + 1
+        while tries <= max_tries:
             logger.debug("Sending request to url: %s (Try: %s)" % (url, tries))
-            resp = requests.get(url, headers=headers, proxies=self.config.get_proxy_dictionary(), auth=auth)
+            resp = requests.get(
+                url,
+                headers=headers,
+                proxies=self.config.get_proxy_dictionary(),
+                auth=auth,
+            )
 
             if resp.status_code != 200:
-                logger.error("Problem with getting data via url %s. Error: %s" % (url, resp.text))
+                logger.error(
+                    "Problem with getting data via url %s. Error: %s" % (url, resp.text)
+                )
                 tries += 1
                 time.sleep(2)
             else:
                 # It can happen that we exceed the github api limit. If we have only 1 request left we will wait
-                if 'X-RateLimit-Remaining' in resp.headers and int(resp.headers['X-RateLimit-Remaining']) <= 1:
+                if (
+                    "X-RateLimit-Remaining" in resp.headers
+                    and int(resp.headers["X-RateLimit-Remaining"]) <= 1
+                ):
+                    self.current_token_index = (self.current_token_index + 1) % (
+                        len(self.config.token)
+                    )
+
+                    if tries < max_tries:
+                        continue
 
                     # We get the reset time (UTC Epoch seconds)
-                    time_when_reset = datetime.datetime.fromtimestamp(float(resp.headers['X-RateLimit-Reset']))
+                    time_when_reset = datetime.datetime.fromtimestamp(
+                        float(resp.headers["X-RateLimit-Reset"])
+                    )
                     now = datetime.datetime.now()
 
                     # Then we substract and add 10 seconds to it (so that we do not request directly at the threshold
-                    waiting_time = ((time_when_reset-now).total_seconds())+10
+                    waiting_time = ((time_when_reset - now).total_seconds()) + 10
 
-                    logger.info("Github API limit exceeded. Waiting for %0.5f seconds..." % waiting_time)
+                    logger.info(
+                        "Github API limit exceeded. Waiting for %0.5f seconds..."
+                        % waiting_time
+                    )
                     time.sleep(waiting_time)
 
-                    resp = requests.get(url, headers=headers, proxies=self.config.get_proxy_dictionary(), auth=auth)
+                    resp = requests.get(
+                        url,
+                        headers=headers,
+                        proxies=self.config.get_proxy_dictionary(),
+                        auth=auth,
+                    )
 
-                logger.debug('Got response: %s' % resp.json())
+                logger.debug("Got response: %s" % resp.json())
 
                 return resp.json()
 
