@@ -61,7 +61,7 @@ class LaunchpadBackend(BaseBackend):
         self.people = {}
 
         # From https://help.launchpad.net/API/SigningRequests
-        if self.config.backend == "launchpad":
+        if cfg and cfg.backend == "launchpad":
             credentials = self._get_credentials()
             self.oauth_token = credentials[0]
             self.oauth_signature = credentials[1]
