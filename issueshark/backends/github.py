@@ -361,12 +361,16 @@ class GithubBackend(BaseBackend):
                 "Authorization": "token %s"
                 % self.config.token[self.current_token_index]
             }
+            
+            self.current_token_index = (self.current_token_index + 1) % len(
+                self.config.token
+            )
         else:
             auth = HTTPBasicAuth(self.config.issue_user, self.config.issue_password)
 
         # Make the request
         tries = 1
-        max_tries = len(self.config.token) + 1
+        max_tries = 3
         while tries <= max_tries:
             logger.debug("Sending request to url: %s (Try: %s)" % (url, tries))
             resp = requests.get(
@@ -388,12 +392,6 @@ class GithubBackend(BaseBackend):
                     "X-RateLimit-Remaining" in resp.headers
                     and int(resp.headers["X-RateLimit-Remaining"]) <= 1
                 ):
-                    self.current_token_index = (self.current_token_index + 1) % (
-                        len(self.config.token)
-                    )
-
-                    if tries < max_tries:
-                        continue
 
                     # We get the reset time (UTC Epoch seconds)
                     time_when_reset = datetime.datetime.fromtimestamp(
