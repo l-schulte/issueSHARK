@@ -126,6 +126,7 @@ class LaunchpadBackend(BaseBackend):
 
                 spec = {
                     "external_id": raw_spec["name"],
+                    "issue_type": "blueprint",
                     "reporter_id": owner,
                     "creator_id": drafter,
                     "assignee_id": assignee,
@@ -192,6 +193,7 @@ class LaunchpadBackend(BaseBackend):
 
                 bug = {
                     "external_id": str(raw_bug["id"]),
+                    "issue_type": "bug",
                     "reporter_id": owner,
                     "creator_id": owner,
                     "assignee_id": assignee,
@@ -233,6 +235,7 @@ class LaunchpadBackend(BaseBackend):
         except DoesNotExist:
             issue = Issue(issue_system_id=self.issue_system_id, external_id=external_id)
 
+        issue.issue_type = raw_issue["issue_type"]
         issue.reporter_id = raw_issue["reporter_id"]
         issue.creator_id = raw_issue["creator_id"]
         issue.assignee_id = raw_issue["assignee_id"]
