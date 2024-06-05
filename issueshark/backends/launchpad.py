@@ -360,7 +360,7 @@ class LaunchpadBackend(BaseBackend):
         if raw_person is None:
             return None
 
-        fallback_email = f'{raw_person["name"]}@no_email.launchpad.issueSHARK'
+        fallback_email = f'{raw_person["name"]}@no_email.launchpad'
         email = elvis(raw_person, "preferred_email_address_link", fallback_email).split("/")[-1]
 
         if email == "tag:launchpad.net:2008:redacted":
