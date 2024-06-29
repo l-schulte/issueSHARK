@@ -72,15 +72,20 @@ class GithubBackend(BaseBackend):
         logger.info("Starting the collection process...")
 
         # Get last modification date (since then, we will collect bugs)
-        last_issue = (
-            Issue.objects(issue_system_id=self.issue_system_id)
-            .order_by("-updated_at")
-            .only("updated_at")
-            .first()
-        )
-        starting_date = None
-        if last_issue is not None:
-            starting_date = last_issue.updated_at
+        # last_issue = (
+        #     Issue.objects(issue_system_id=self.issue_system_id)
+        #     .order_by("-updated_at")
+        #     .only("updated_at")
+        #     .first()
+        # )
+        # starting_date = None
+        # if last_issue is not None:
+        #     starting_date = last_issue.updated_at
+
+        existing_issues = Issue.objects(issue_system_id=self.issue_system_id).only("external_id")
+        existing_issues = set([str(issue.external_id) for issue in existing_issues])
+
+        starting_date = datetime.date(2000, 1, 1)
 
         # Get all issues
         issues = self.get_issues(start_date=starting_date)
@@ -94,6 +99,10 @@ class GithubBackend(BaseBackend):
         page_number = 1
         while len(issues) > 0:
             for issue in issues:
+
+                if str(issue["number"]) in existing_issues:
+                    continue
+
                 mongo_issue = self.store_issue(issue)
                 self._process_comments(str(issue["number"]), mongo_issue)
                 self._process_events(str(issue["number"]), mongo_issue)
