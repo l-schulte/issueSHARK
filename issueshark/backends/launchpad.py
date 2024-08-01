@@ -200,7 +200,7 @@ class LaunchpadBackend(BaseBackend):
 
             for raw_base_bug in response["entries"]:
 
-                if str(raw_bug["id"]) in existing_issues:
+                if str(raw_base_bug["self_link"]).split("/")[-1] in existing_issues:
                     continue
 
                 raw_bug = self._send_request(raw_base_bug["bug_link"])
