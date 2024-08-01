@@ -238,6 +238,8 @@ class LaunchpadBackend(BaseBackend):
 
         external_id = raw_issue["external_id"]
 
+        logger.info("Processing issue %s" % external_id)
+
         try:
             issue = Issue.objects(issue_system_id=self.issue_system_id, external_id=external_id).get()
         except DoesNotExist:
