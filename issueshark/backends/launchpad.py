@@ -101,6 +101,11 @@ class LaunchpadBackend(BaseBackend):
 
         response = {"next_collection_link": BASE_URL}
 
+        existing_issues = Issue.objects(issue_system_id=self.issue_system_id, issue_type="blueprint").only(
+            "external_id"
+        )
+        existing_issues = set([str(issue.external_id) for issue in existing_issues])
+
         while "next_collection_link" in response:
             response = self._send_request(response["next_collection_link"])
 
@@ -183,7 +188,7 @@ class LaunchpadBackend(BaseBackend):
             + "".join([f"&status={status}" for status in STATUS_VALUES])
         }
 
-        existing_issues = Issue.objects(issue_system_id=self.issue_system_id).only("external_id")
+        existing_issues = Issue.objects(issue_system_id=self.issue_system_id, issue_type="bug").only("external_id")
         existing_issues = set([str(issue.external_id) for issue in existing_issues])
 
         while "next_collection_link" in response:
