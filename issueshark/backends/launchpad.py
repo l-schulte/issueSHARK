@@ -183,10 +183,17 @@ class LaunchpadBackend(BaseBackend):
             + "".join([f"&status={status}" for status in STATUS_VALUES])
         }
 
+        existing_issues = Issue.objects(issue_system_id=self.issue_system_id).only("external_id")
+        existing_issues = set([str(issue.external_id) for issue in existing_issues])
+
         while "next_collection_link" in response:
             response = self._send_request(response["next_collection_link"])
 
             for raw_base_bug in response["entries"]:
+
+                if str(raw_bug["id"]) in existing_issues:
+                    continue
+
                 raw_bug = self._send_request(raw_base_bug["bug_link"])
 
                 owner = self._get_people(raw_bug["owner_link"])
