@@ -110,6 +110,10 @@ class LaunchpadBackend(BaseBackend):
             response = self._send_request(response["next_collection_link"])
 
             for raw_spec in response["entries"]:
+
+                if str(raw_spec["name"]) in existing_issues:
+                    continue
+
                 bugs = self._send_request(raw_spec["bugs_collection_link"])
                 bug_ids = [{"id": str(bug["id"])} for bug in bugs["entries"]]
 
