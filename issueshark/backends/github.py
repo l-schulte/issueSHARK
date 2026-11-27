@@ -127,18 +127,9 @@ class GithubBackend(BaseBackend):
         new_issue.status = raw_issue['state']
         new_issue.labels = labels
 
-        # Convert all label strings to lowercase for bulletproof matching
-        lowercase_labels = [l.lower() for l in labels]
-
-        if 'bug' in lowercase_labels or 'defect' in lowercase_labels:
-            new_issue.issue_type = 'Bug'
-        elif 'enhancement' in lowercase_labels or 'feature' in lowercase_labels:
-            new_issue.issue_type = 'Enhancement'
-        elif 'task' in lowercase_labels:
-            new_issue.issue_type = 'Task'
-        else:
-            # Fallback to keep it from hitting None -> "other"
-            new_issue.issue_type = 'Issue' 
+        native_type = raw_issue.get('type')
+        if isinstance(native_type, dict) and native_type.get('name'):
+            new_issue.issue_type = native_type['name']
             
         # github issues can be pull requests too (gitea is probably the same)
         if 'pull_request' in raw_issue.keys():
